@@ -31,8 +31,12 @@ int timeout_connect(int s, const struct sockaddr *name, socklen_t namelen, int t
 int create_socket(int domain, int proto, const char *local, const char *bind_dev, int local_port, const char *server, int port, struct addrinfo **server_res_out);
 int netdial(int domain, int proto, const char *local, const char *bind_dev, int local_port, const char *server, int port, int timeout);
 int netannounce(int domain, int proto, const char *local, const char *bind_dev, int port);
-int Nread(int fd, char *buf, size_t count, int prot);
-int Nwrite(int fd, const char *buf, size_t count, int prot) /* __attribute__((hot)) */;
+
+#define Nread(a,b,c,d) Nread3params(a,b,c)
+int Nread3params(int fd, char *buf, size_t count);  
+#define Nwrite(a,b,c,d) Nwrite3params(a,b,c)
+int Nwrite3params(int fd, const char *buf, size_t count) /* __attribute__((hot)) */;
+
 int has_sendfile(void);
 int Nsendfile(int fromfd, int tofd, const char *buf, size_t count) /* __attribute__((hot)) */;
 int setnonblocking(int fd, int nonblocking);
@@ -41,5 +45,7 @@ int parse_qos(const char *tos);
 
 #define NET_SOFTERROR -1
 #define NET_HARDERROR -2
+
+extern unsigned int readloops, writeloops;
 
 #endif /* __NET_H */

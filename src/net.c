@@ -65,8 +65,8 @@
 #include "net.h"
 #include "timer.h"
 
-static int nread_read_timeout = 10;
-static int nread_overall_timeout = 30;
+#define nread_read_timeout     (10) 
+#define nread_overall_timeout  (30)
 
 /*
  * Declaration of gerror in iperf_error.c.  Most other files in iperf3 can get this
@@ -372,14 +372,14 @@ netannounce(int domain, int proto, const char *local, const char *bind_dev, int 
 /********************************************************************/
 
 int
-Nread(int fd, char *buf, size_t count, int prot)
+Nread3params (int fd, char *buf, size_t count)
 {
-    register ssize_t r;
-    register size_t nleft = count;
+    register ssize_t  r;
+    struct timeval    timeout  = { nread_read_timeout, 0 };
+    fd_set            rfdset   = { 0 } ;
     struct iperf_time ftimeout = { 0, 0 };
-
-    fd_set rfdset;
-    struct timeval timeout = { nread_read_timeout, 0 };
+    struct iperf_time now; 
+    register size_t   nleft    = count;
 
     /*
      * fd might not be ready for reading on entry. Check for this
@@ -392,7 +392,6 @@ Nread(int fd, char *buf, size_t count, int prot)
      * to here as the result of a select() call.
      */
     {
-        FD_ZERO(&rfdset);
         FD_SET(fd, &rfdset);
         r = select(fd + 1, &rfdset, NULL, NULL, &timeout);
         if (r < 0) {
@@ -403,54 +402,45 @@ Nread(int fd, char *buf, size_t count, int prot)
         }
     }
 
-    while (nleft > 0) {
-        r = read(fd, buf, nleft);
-        if (r < 0) {
-            /* XXX EWOULDBLOCK can't happen without non-blocking sockets */
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-                break;
-            else
-                return NET_HARDERROR;
-        } else if (r == 0)
-            break;
-
-        nleft -= r;
-        buf += r;
-
-        /*
-         * We need some more bytes but don't want to wait around
-         * forever for them. In the case of partial results, we need
-         * to be able to read some bytes every nread_timeout seconds.
-         */
-        if (nleft > 0) {
-            struct iperf_time now;
-
+    do {
+        r = read(fd, buf + count - nleft, nleft);
+        if (r >= 0) {
+            nleft -= r;
+            if ( !nleft ) return count;
             /*
+             * We need some more bytes but don't want to wait around
+             * forever for them. In the case of partial results, we need
+             * to be able to read some bytes every nread_timeout seconds.
+             *
              * Also, we have an approximate upper limit for the total time
              * that a Nread call is supposed to take. We trade off accuracy
              * of this timeout for a hopefully lower performance impact.
              */
             iperf_time_now(&now);
-            if (ftimeout.secs == 0) {
+            if (ftimeout.secs) {
+                if ( (ftimeout.secs < now.secs) && (iperf_time_compare(&ftimeout, &now) < 0) )
+                    return count - nleft; 
+            } else {
                 ftimeout = now;
                 iperf_time_add_usecs(&ftimeout, nread_overall_timeout * 1000000L);
             }
-            if (iperf_time_compare(&ftimeout, &now) < 0) {
-                break;
+            /* FD_SET(fd, &rfdset); unnecessary so removed.  We would have returned after whichever previous select() if no bits set */
+            if ( !(r = select(fd + 1, &rfdset, NULL, NULL, &timeout)) ) { 
+                return count - nleft;
             }
-
-            FD_ZERO(&rfdset);
-            FD_SET(fd, &rfdset);
-            r = select(fd + 1, &rfdset, NULL, NULL, &timeout);
             if (r < 0) {
                 return NET_HARDERROR;
             }
-            if (r == 0) {
-                break;
-            }
+        } else {
+            /* r is less than zero */
+            /* XXX EWOULDBLOCK can't happen without non-blocking sockets */
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                return count - nleft;
+            else
+                return NET_HARDERROR;
         }
-    }
-    return count - nleft;
+    } while (1);
+    return count; /* code can never gets here via its logic */
 }
 
 
@@ -459,22 +449,26 @@ Nread(int fd, char *buf, size_t count, int prot)
  */
 
 int
-Nwrite(int fd, const char *buf, size_t count, int prot)
+Nwrite3params (int fd, const char *buf, size_t count)
 {
     register ssize_t r;
     register size_t nleft = count;
 
-    while (nleft > 0) {
-	r = write(fd, buf, nleft);
-	if (r < 0) {
+    do {
+	r = write(fd, buf + count - nleft, nleft);
+        nleft -= r;
+        if ( !nleft ) return count; /* we got the requested bytes so return and do not check errs! */
+	if (r <= 0) {
+            if (r == 0)
+                return NET_SOFTERROR;  
 	    switch (errno) {
-		case EINTR:
+ 		case EINTR:
 		case EAGAIN:
 #if (EAGAIN != EWOULDBLOCK)
                     /* XXX EWOULDBLOCK can't happen without non-blocking sockets */
 		case EWOULDBLOCK:
 #endif
-		return count - nleft;
+                    return count - nleft + r; /* add r back since we shortcut substracted it after the write() */
 
 		case ENOBUFS:
 		return NET_SOFTERROR;
@@ -482,12 +476,9 @@ Nwrite(int fd, const char *buf, size_t count, int prot)
 		default:
 		return NET_HARDERROR;
 	    }
-	} else if (r == 0)
-	    return NET_SOFTERROR;
-	nleft -= r;
-	buf += r;
-    }
-    return count;
+	} 
+    } while (1);
+    return 0; /* return value doesn't matter since code can't get here */
 }
 
 

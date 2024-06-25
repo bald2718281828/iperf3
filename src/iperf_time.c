@@ -102,10 +102,10 @@ iperf_time_in_secs(struct iperf_time *time)
 int
 iperf_time_compare(struct iperf_time *time1, struct iperf_time *time2)
 {
-    if (time1->secs < time2->secs)
-        return -1;
     if (time1->secs > time2->secs)
         return 1;
+    if (time1->secs < time2->secs)
+        return -1;
     if (time1->usecs < time2->usecs)
         return -1;
     if (time1->usecs > time2->usecs)
